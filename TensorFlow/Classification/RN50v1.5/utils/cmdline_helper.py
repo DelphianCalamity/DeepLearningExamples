@@ -268,6 +268,89 @@ def parse_cmdline():
         help="""Specify ID of the target GPU on multi-device platform. Effective only for single-GPU mode."""
     )
     
+    p.add_argument(
+        '--horovod_device',
+        choices=['cpu', 'gpu'],
+        type=str,
+        default=None,
+        required=False,
+        help='Device to do Horovod all-reduce on: '
+             'empty (default), cpu or gpu. Default with utilize GPU if '
+             'Horovod was compiled with the HOROVOD_GPU_ALLREDUCE '
+             'option, and CPU otherwise.'
+    )
+
+    p.add_argument(
+        '--horovod_compress_method',
+        choices=['none', 'fp16', 'randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
+                 'signsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch'],
+        type=str,
+        default='none',
+        required=False,
+        help="""The method for compressing the variables used in hororvod"""
+    )
+
+    p.add_argument(
+        '--horovod_comm_method',
+        choices=['allreduce', 'broadcast', 'centralized', 'allgather'],
+        type=str,
+        default='allreduce',
+        required=False,
+        help="The method for communicating the variables used in hororvod: allreduce,"
+             "broadcast, centralized, allgather"
+    )
+
+    _add_bool_argument(
+        parser=p,
+        name="horovod_compress_memory",
+        default=False,
+        required=False,
+        help="Whether to use memory for compression method."
+    )
+
+    _add_bool_argument(
+        parser=p,
+        name="horovod_gradient_clipping",
+        default=False,
+        required=False,
+        help="Whether to use gradient clipping before apply the compression."
+    )
+
+    p.add_argument(
+        '--horovod_compress_ratio',
+        type=float,
+        default=0.1,
+        help="""Set the sparsification ratio"""
+    )
+
+    p.add_argument(
+        '--horovod_threshold_val',
+        type=float,
+        default=0.01,
+        help="""Set the sparsification ratio"""
+    )
+
+    p.add_argument(
+        '--horovod_quantum_number',
+        type=int,
+        default=256,
+        help="""Set the quantum states for QSGD, default 256 states, minimum 1 state."""
+    )
+
+    p.add_argument(
+        '--wandb_tags',
+        type=str,
+        required=False,
+        help="""tags to be passed in wandb.init()"""
+    )
+
+    p.add_argument(
+        '--monitor_interface_usage',
+        type=str,
+        required=False,
+        help="Log receive and transmit bytes of comma separated interfaces, defaults to all available interfaces"
+             "except for lo"
+    )
     
     FLAGS, unknown_args = p.parse_known_args()
 
@@ -279,3 +362,4 @@ def parse_cmdline():
         raise ValueError("Invalid command line arg(s)")
 
     return FLAGS
+
