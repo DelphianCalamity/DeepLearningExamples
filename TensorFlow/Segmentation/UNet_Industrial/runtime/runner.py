@@ -31,6 +31,7 @@ import numpy as np
 
 import tensorflow as tf
 import horovod.tensorflow as hvd
+import wandb
 
 from datasets import known_datasets
 
@@ -118,6 +119,10 @@ class Runner(object):
 
         if hvd_utils.is_using_hvd():
             hvd.init()
+
+            if hvd.rank()!=0:
+                os.environ['WANDB_MODE'] = 'dryrun'
+            wandb.init()
 
             if hvd.local_rank() == 0:
                 LOGGER.log("Horovod successfully initialized ...")

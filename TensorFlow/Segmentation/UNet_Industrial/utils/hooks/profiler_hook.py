@@ -26,6 +26,7 @@ import operator
 
 import numpy as np
 import tensorflow as tf
+import wandb
 
 from dllogger.logger import LOGGER
 
@@ -150,6 +151,8 @@ class ProfilerHook(tf.train.SessionRunHook):
         is_log_step = self._current_step % self._log_every == 0
 
         if is_log_step:
+            tag = 'train' if self._is_training else 'eval'
+            wandb.log({f"{tag}/imgs_per_sec": imgs_per_sec}, commit=False)
 
             if self._current_step > self._warmup_steps:
                 imgs_per_sec = float(ProfilerHook.moving_average(self._processing_speed_arr, n=30)[-1])
@@ -162,9 +165,16 @@ class ProfilerHook(tf.train.SessionRunHook):
                 LOGGER.log("reconstruction_loss", float(run_values.results["reconstruction_loss"]))
                 LOGGER.log("total_loss", float(run_values.results["total_loss"]))
                 LOGGER.log("learning_rate", float(run_values.results["learning_rate"]))
+                wandb.log({
+                    f"{tag}/weight_decay": float(run_values.results["weight_decay"]),
+                    f"{tag}/reconstruction_loss": float(run_values.results["reconstruction_loss"]),
+                    f"{tag}/total_loss": float(run_values.results["total_loss"]),
+                    f"{tag}/learning_rate": float(run_values.results["learning_rate"])
+                }, commit=False)
 
             for key, val in sorted(run_values.results["iou_scores"].items(), key=operator.itemgetter(0)):
                 LOGGER.log("iou_score - THS %s" % key, float(val))
+                wandb.log({f"{tag}/iou_score_THS_{key}": float(val)}, commit=False)
 
             LOGGER.log("True Positives:", run_values.results["confusion_matrix"]["tp"])
             LOGGER.log("True Negatives:", run_values.results["confusion_matrix"]["tn"])
@@ -184,12 +194,13 @@ class ProfilerHook(tf.train.SessionRunHook):
                         os.path.join(self._sample_dir, "sample_step_%04d_mask.jpeg" % self._current_step), 'wb'
                     ) as fd:
                         fd.write(run_values.results["samples"]["mask"])
-
             print("######### STOP: %d ##############" % self._current_step)
 
         elif self._current_step > self._warmup_steps:
             # Do not store speed for log step due to additional fetches
             self._processing_speed_arr.append(imgs_per_sec)
+
+        wandb.log({"global_step": self._current_step})
 
     def end(self, session):
 
@@ -213,6 +224,8 @@ class ProfilerHook(tf.train.SessionRunHook):
         perf_dict = {'throughput': str(avg_processing_speed), 'processing_time': str(total_processing_time)}
 
         perf_filename = "performances_%s.json" % ("train" if self._is_training else "eval")
+
+        wandb.log({f"{'train' if self._is_training else 'eval'}/total_throughput": avg_processing_speed})
 
         with open(os.path.join(self._sample_dir, "..", perf_filename), 'w') as f:
             json.dump(perf_dict, f)
