@@ -38,6 +38,7 @@ import pandas as pd
 import numpy as np
 import cupy as cp
 import horovod.tensorflow as hvd
+import wandb
 
 from mpi4py import MPI
 
@@ -173,6 +174,9 @@ def main():
 
     if hvd.rank() == 0:
         log_args(args)
+    else:
+        os.environ['WANDB_MODE'] = 'dryrun'
+    wandb.init(config=args, sync_tensorboard=True)
 
     if args.seed is not None:
         tf.random.set_random_seed(args.seed)
@@ -219,7 +223,7 @@ def main():
     # Create and run Data Generator in a separate thread
     data_generator = DataGenerator(
         args.seed,
-        hvd.rank(),
+        hvd.local_rank(),
         nb_users,
         nb_items,
         neg_mat,
@@ -364,6 +368,7 @@ def main():
                 }
             )
         train_duration = time.time() - train_start
+        wandb.log({"train/epoch_time": train_duration}, commit=False)
         ## Only log "warm" epochs
         if epoch >= 1:
             train_times.append(train_duration)
@@ -399,6 +404,10 @@ def main():
             ndcg = global_ndcg_sum[0] / global_ndcg_count[0]
 
             eval_duration = time.time() - eval_start
+            wandb.log({"eval/time": eval_duration,
+                       "eval/hit_rate": hit_rate,
+                       "eval/ndcg": ndcg
+                      }, commit=False)
             ## Only log "warm" epochs
             if epoch >= 1:
                 eval_times.append(eval_duration)
@@ -438,6 +447,7 @@ def main():
                     # Save, if meets target
                     if hit_rate > args.target:
                         saver.save(sess, final_checkpoint_path)
+        wandb.log({"epoch": epoch+1})
 
     # Final Summary
     if hvd.rank() == 0:
@@ -462,6 +472,14 @@ def main():
         LOGGER.log('Time to Best:                 {:.4f}'.format(time_to_best))
         LOGGER.log('Best HR:                      {:.4f}'.format(best_hr))
         LOGGER.log('Best Epoch:                   {}'.format(best_epoch))
+        wandb.log({"batch_size": args.batch_size,
+                   "num_gpus": hvd.size(),
+                   "train/total_throughput": np.mean(train_throughputs),
+                   "eval/total_throughput": np.mean(eval_throughputs),
+                   "train/time_to_target": time_to_train,
+                   "train/time_to_best": time_to_best,
+                   "epoch": args.epochs
+                  })
 
     sess.close()
     return
