@@ -421,7 +421,7 @@ class Runner(object):
         if hvd_utils.is_using_hvd():
             training_hooks.append(hvd.BroadcastGlobalVariablesHook(0))
 
-        if not hvd_utils.is_using_hvd() or hvd.local_rank() == 0:
+        if not hvd_utils.is_using_hvd() or hvd.rank() == 0:
             training_hooks.append(
                 ProfilerHook(
                     global_batch_size=global_batch_size,
