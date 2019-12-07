@@ -21,6 +21,7 @@ import warnings
 import tensorflow as tf
 
 import horovod.tensorflow as hvd
+import wandb
 
 from model import resnet_v1_5
 
@@ -159,6 +160,10 @@ class Runner(object):
         )
 
         self.run_hparams = Runner._build_hparams(model_hparams, run_config_additional, run_config_performance)
+
+        if hvd.rank() != 0:
+            os.environ['WANDB_MODE'] = 'dryrun'
+        wandb.init(config=self.run_hparams.values(), sync_tensorboard=True)
 
         self._model = resnet_v1_5.ResnetModel(
             model_name="resnet50_v1.5",
