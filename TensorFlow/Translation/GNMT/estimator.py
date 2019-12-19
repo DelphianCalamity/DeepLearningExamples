@@ -37,6 +37,7 @@ import subprocess
 import time
 import numpy as np
 import tensorflow as tf
+import horovod.tensorflow as hvd
 
 from tensorflow.contrib.compiler import xla
 from tensorflow.core.protobuf import rewriter_config_pb2
@@ -118,40 +119,40 @@ class ModelFnFactory(object):
   def __init__(self, hparams):
     self.hparams = hparams
 
-  def build_graph_dist_strategy(self, features, labels, mode, params):
-    """Model function."""
-    del labels, params
-    misc_utils.print_out("Running dist_strategy mode_fn")
-
-    hparams = self.hparams
-
-    # Create a GNMT model for training.
-    # assert (hparams.encoder_type == "gnmt" or
-    #        hparams.attention_architecture in ["gnmt", "gnmt_v2"])
-    with mixed_precision_scope():
-      model = gnmt_model.GNMTModel(hparams, mode=mode, features=features)
-      if mode == tf.contrib.learn.ModeKeys.INFER:
-        sample_ids = model.sample_id
-        reverse_target_vocab_table = lookup_ops.index_to_string_table_from_file(
-            hparams.tgt_vocab_file, default_value=vocab_utils.UNK)
-        sample_words = reverse_target_vocab_table.lookup(
-            tf.to_int64(sample_ids))
-        # make sure outputs is of shape [batch_size, time] or [beam_width,
-        # batch_size, time] when using beam search.
-        if hparams.time_major:
-          sample_words = tf.transpose(sample_words)
-        elif sample_words.shape.ndims == 3:
-          # beam search output in [batch_size, time, beam_width] shape.
-          sample_words = tf.transpose(sample_words, [2, 0, 1])
-        predictions = {"predictions": sample_words}
-        # return loss, vars, grads, predictions, train_op, scaffold
-        return None, None, None, predictions, None, None
-      elif mode == tf.contrib.learn.ModeKeys.TRAIN:
-        loss = model.train_loss
-        train_op = model.update
-        return loss, model.params, model.grads, None, train_op, None
-      else:
-        raise ValueError("Unknown mode in model_fn: %s" % mode)
+  # def build_graph_dist_strategy(self, features, labels, mode, params):
+  #   """Model function."""
+  #   del labels, params
+  #   misc_utils.print_out("Running dist_strategy mode_fn")
+  #
+  #   hparams = self.hparams
+  #
+  #   # Create a GNMT model for training.
+  #   # assert (hparams.encoder_type == "gnmt" or
+  #   #        hparams.attention_architecture in ["gnmt", "gnmt_v2"])
+  #   with mixed_precision_scope():
+  #     model = gnmt_model.GNMTModel(hparams, mode=mode, features=features)
+  #     if mode == tf.contrib.learn.ModeKeys.INFER:
+  #       sample_ids = model.sample_id
+  #       reverse_target_vocab_table = lookup_ops.index_to_string_table_from_file(
+  #           hparams.tgt_vocab_file, default_value=vocab_utils.UNK)
+  #       sample_words = reverse_target_vocab_table.lookup(
+  #           tf.to_int64(sample_ids))
+  #       # make sure outputs is of shape [batch_size, time] or [beam_width,
+  #       # batch_size, time] when using beam search.
+  #       if hparams.time_major:
+  #         sample_words = tf.transpose(sample_words)
+  #       elif sample_words.shape.ndims == 3:
+  #         # beam search output in [batch_size, time, beam_width] shape.
+  #         sample_words = tf.transpose(sample_words, [2, 0, 1])
+  #       predictions = {"predictions": sample_words}
+  #       # return loss, vars, grads, predictions, train_op, scaffold
+  #       return None, None, None, predictions, None, None
+  #     elif mode == tf.contrib.learn.ModeKeys.TRAIN:
+  #       loss = model.train_loss
+  #       train_op = model.update
+  #       return loss, model.params, model.grads, None, train_op, None
+  #     else:
+  #       raise ValueError("Unknown mode in model_fn: %s" % mode)
 
   def _create_loss_scale_vars(self):
     """docstring."""
@@ -229,6 +230,7 @@ class ModelFnFactory(object):
       scaled_loss = tower_loss
 
     opt = self.get_optimizer(self.hparams, learning_rate)
+    opt = hvd.DistributedOptimizer(opt)
     grads_and_vars = opt.compute_gradients(scaled_loss, tower_params,
             colocate_gradients_with_ops=self.hparams.colocate_gradients_with_ops)
     grads = [x for (x, _) in grads_and_vars]
@@ -248,7 +250,7 @@ class ModelFnFactory(object):
 
   def _get_variable_mgr(self, hparams):
     """docstring."""
-    assert not hparams.use_dist_strategy
+    # assert not hparams.use_dist_strategy
 
     # A hack to create a container object that later get passed to VariableMgr
     # __init__() as the ill-designed `benchmark_cnn` argument.
@@ -536,34 +538,34 @@ def make_model_fn(hparams):
   """Construct a GNMT model function for training."""
   factory = ModelFnFactory(hparams)
 
-  if hparams.use_dist_strategy:
-    def fn(features, labels, mode, params):
-      """docstring."""
-      (loss, _, _, predictions, train_op,
-       _) = factory.build_graph_dist_strategy(features, labels, mode, params)
-      if mode == tf.contrib.learn.ModeKeys.INFER:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
-      else:
-        if hparams.use_tpu:
-          return tf.contrib.tpu.TPUEstimatorSpec(
-              mode=mode, loss=loss, train_op=train_op)
-        else:
-          return tf.estimator.EstimatorSpec(mode=mode, loss=loss,
-                                            train_op=train_op)
-    return fn
-  else:
-    build_fn = factory.build_graph
-    def fn(features, labels, mode, params):
-      """docstring."""
-      (loss, _, _, predictions, train_op, scaffold) = build_fn(
-          features, labels, mode, params)
-      if mode == tf.contrib.learn.ModeKeys.INFER:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
-      else:
-        return tf.estimator.EstimatorSpec(mode=mode, loss=loss,
-                                          scaffold=scaffold,
-                                          train_op=train_op)
-    return fn
+  # if hparams.use_dist_strategy:
+  #   def fn(features, labels, mode, params):
+  #     """docstring."""
+  #     (loss, _, _, predictions, train_op,
+  #      _) = factory.build_graph_dist_strategy(features, labels, mode, params)
+  #     if mode == tf.contrib.learn.ModeKeys.INFER:
+  #       return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+  #     else:
+  #       if hparams.use_tpu:
+  #         return tf.contrib.tpu.TPUEstimatorSpec(
+  #             mode=mode, loss=loss, train_op=train_op)
+  #       else:
+  #         return tf.estimator.EstimatorSpec(mode=mode, loss=loss,
+  #                                           train_op=train_op)
+  #   return fn
+  # else:
+  build_fn = factory.build_graph
+  def fn(features, labels, mode, params):
+    """docstring."""
+    (loss, _, _, predictions, train_op, scaffold) = build_fn(
+        features, labels, mode, params)
+    if mode == tf.contrib.learn.ModeKeys.INFER:
+      return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    else:
+      return tf.estimator.EstimatorSpec(mode=mode, loss=loss,
+                                        scaffold=scaffold,
+                                        train_op=train_op)
+  return fn
 
 
 def make_input_fn(hparams, mode):
@@ -671,13 +673,13 @@ def make_input_fn(hparams, mode):
     return _input_fn
 
 
-def get_distribution_strategy(num_gpus):
-  if num_gpus == 0:
-    return tf.contrib.distribute.OneDeviceStrategy("device:CPU:0")
-  elif num_gpus == 1:
-    return tf.contrib.distribute.OneDeviceStrategy("device:GPU:0")
-  else:
-    return tf.contrib.distribute.MirroredStrategy(num_gpus=num_gpus)
+# def get_distribution_strategy(num_gpus):
+#   if num_gpus == 0:
+#     return tf.contrib.distribute.OneDeviceStrategy("device:CPU:0")
+#   elif num_gpus == 1:
+#     return tf.contrib.distribute.OneDeviceStrategy("device:GPU:0")
+#   else:
+#     return tf.contrib.distribute.MirroredStrategy(num_gpus=num_gpus)
 
 
 def get_sacrebleu(trans_file, detokenizer_file):
@@ -780,7 +782,7 @@ def get_metrics(hparams, model_fn, ckpt=None, only_translate=False):
       tf_summary, pred_estimator.get_variable_value(tf.GraphKeys.GLOBAL_STEP))
 
   summary_writer.close()
-  return score, benchmark_hook.get_average_speed_and_latencies(), sum(output_tokens)
+  return pred_estimator.get_variable_value(tf.GraphKeys.GLOBAL_STEP), score, benchmark_hook.get_average_speed_and_latencies(), sum(output_tokens)
 
 
 def train_fn(hparams):
@@ -790,33 +792,34 @@ def train_fn(hparams):
 
   log_step_count_steps = hparams.log_step_count_steps
   save_checkpoints_steps = hparams.save_checkpoints_steps
-  if hparams.use_dist_strategy:
-    distribution_strategy = get_distribution_strategy(hparams.num_gpus)
-    config = tf.estimator.RunConfig(
-        train_distribute=distribution_strategy,
-        log_step_count_steps=log_step_count_steps,
-        keep_checkpoint_max=None,
-        save_checkpoints_steps=save_checkpoints_steps)
-  else:
-    sess_config = tf.ConfigProto(allow_soft_placement=True)
-    if hparams.use_autojit_xla:
-      sess_config.graph_options.optimizer_options.global_jit_level = (
-          tf.OptimizerOptions.ON_1)
-    if not hparams.use_pintohost_optimizer:
-      sess_config.graph_options.rewrite_options.pin_to_host_optimization = (
-          rewriter_config_pb2.RewriterConfig.OFF)
-    config = tf.estimator.RunConfig(
-        log_step_count_steps=log_step_count_steps,
-        session_config=sess_config,
-        keep_checkpoint_max=None,
-        save_checkpoints_steps=save_checkpoints_steps)
+  # if hparams.use_dist_strategy:
+  #   distribution_strategy = get_distribution_strategy(hparams.num_gpus)
+  #   config = tf.estimator.RunConfig(
+  #       train_distribute=distribution_strategy,
+  #       log_step_count_steps=log_step_count_steps,
+  #       keep_checkpoint_max=None,
+  #       save_checkpoints_steps=save_checkpoints_steps)
+  # else:
+  sess_config = tf.ConfigProto(allow_soft_placement=True)
+  sess_config.gpu_options.visible_device_list = str(hvd.local_rank())
+  if hparams.use_autojit_xla:
+    sess_config.graph_options.optimizer_options.global_jit_level = (
+        tf.OptimizerOptions.ON_1)
+  if not hparams.use_pintohost_optimizer:
+    sess_config.graph_options.rewrite_options.pin_to_host_optimization = (
+        rewriter_config_pb2.RewriterConfig.OFF)
+  config = tf.estimator.RunConfig(
+      log_step_count_steps=log_step_count_steps,
+      session_config=sess_config,
+      keep_checkpoint_max=None,
+      save_checkpoints_steps=save_checkpoints_steps)
 
   misc_utils.print_out("sess master is %s" % config.master)
   estimator = tf.estimator.Estimator(
       model_fn=model_fn, model_dir=hparams.output_dir, config=config)
 
   benchmark_hook = BenchmarkHook(hparams.batch_size, hparams.warmup_steps + 5)
-  train_hooks = [benchmark_hook]
+  train_hooks = [hvd.BroadcastGlobalVariablesHook(0), benchmark_hook]
   if hparams.profile:
     train_hooks.append(tf.train.ProfilerHook(
         output_dir=hparams.output_dir,
@@ -825,13 +828,14 @@ def train_fn(hparams):
         show_memory=True))
 
   max_steps = hparams.debug_num_train_steps
-  estimator.train(
+  global_step = estimator.train(
       input_fn=input_fn,
       max_steps=max_steps,
       hooks=train_hooks,
-  )
+  ).get_variable_value(tf.GraphKeys.GLOBAL_STEP)
 
-  return benchmark_hook.get_average_speed_and_latencies()
+  sentences_sec, latencies = benchmark_hook.get_average_speed_and_latencies()
+  return global_step, sentences_sec, latencies
 
 
 def eval_fn(hparams, ckpt=None, only_translate=False):

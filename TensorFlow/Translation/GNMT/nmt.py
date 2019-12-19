@@ -40,6 +40,8 @@ import subprocess
 import numpy as np
 import time
 import tensorflow as tf
+import horovod.tensorflow as hvd
+import wandb
 
 import estimator
 from utils import evaluation_utils
@@ -129,7 +131,7 @@ def add_arguments(parser):
 
   # optimizer
   parser.add_argument(
-      "--optimizer", type=str, default="adam", help="sgd | adam")
+      "--optimizer", type=str, default="sgd", help="sgd | adam")
   parser.add_argument(
       "--learning_rate",
       type=float,
@@ -446,8 +448,8 @@ def add_arguments(parser):
   # Graph knobs
   parser.add_argument("--parallel_iterations", type=int, default=10,
                       help="number of parallel iterations in dynamic_rnn")
-  parser.add_argument("--use_dist_strategy", type="bool", default=False,
-                      help="whether to use distribution strategy")
+  # parser.add_argument("--use_dist_strategy", type="bool", default=False,
+  #                     help="whether to use distribution strategy")
   parser.add_argument(
       "--hierarchical_copy",
       type="bool",
@@ -677,7 +679,7 @@ def create_hparams(flags):
       # Graph knobs
       parallel_iterations=flags.parallel_iterations,
       use_dynamic_rnn=flags.use_dynamic_rnn,
-      use_dist_strategy=flags.use_dist_strategy,
+      # use_dist_strategy=flags.use_dist_strategy,
       hierarchical_copy=flags.hierarchical_copy,
       network_topology=flags.network_topology,
       use_block_lstm=flags.use_block_lstm,
@@ -881,6 +883,7 @@ def run_main(flags, default_hparams, estimator_fn):
 
   # Load hparams.
   hparams = create_or_load_hparams(default_hparams, flags.hparams_path)
+  wandb.config.update(hparams.values())
 
   # Train or Evaluation
   estimator_fn(hparams)
@@ -903,8 +906,8 @@ def main(unused_argv):
 
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  if FLAGS.use_fp16 and FLAGS.use_dist_strategy:
-    raise ValueError("use_fp16 and use_dist_strategy aren't compatible")
+  # if FLAGS.use_fp16 and FLAGS.use_dist_strategy:
+  #   raise ValueError("use_fp16 and use_dist_strategy aren't compatible")
 
   if FLAGS.use_fp16 + FLAGS.use_amp + FLAGS.use_fastmath > 1:
     raise ValueError("Only one of use_fp16, use_amp, use_fastmath can be set")
@@ -1021,6 +1024,7 @@ def main(unused_argv):
     hparams = create_or_load_hparams(default_hparams, FLAGS.hparams_path)
     utils.print_out("training hparams:")
     utils.print_hparams(hparams)
+    wandb.config.update(hparams.values())
     with tf.gfile.GFile(os.path.join(output_dir, "train_hparams.txt"), "w") as f:
       f.write(utils.serialize_hparams(hparams) + "\n")
 
@@ -1043,24 +1047,34 @@ def main(unused_argv):
       utils.print_out("Starting epoch %d" % epochs)
       try:
         train_start = time.time()
-        train_speed, _ = estimator.train_fn(hparams)
+        global_step, sentences_sec, latencies = estimator.train_fn(hparams)
+        train_end = time.time()
+        train_delta = train_end - train_start
+        tokens_sec = sentences_sec * (train_src_tokens + train_tgt_tokens) / train_sentences
+        utils.print_out("training time for epoch %d: %.2f mins (%.2f sent/sec, %.2f tokens/sec)" %
+                        (epochs + 1, train_delta / 60., sentences_sec), f=sys.stderr)
+        wandb.log({"train/sentences_per_second": sentences_sec,
+                   "train/tokens_per_second": tokens_sec}, step=global_step, commit=False)
+        wandb.log({f"train/latency_{k if k == 'avg' else k + '_percentile'}": latencies[k] for k in latencies},
+                  step=global_step)
       except tf.errors.OutOfRangeError:
         utils.print_out("training hits OutOfRangeError", f=sys.stderr)
 
-      train_end = time.time()
-      train_delta = train_end - train_start
-      utils.print_out("training time for epoch %d: %.2f mins (%.2f sent/sec, %.2f tokens/sec)" %
-                      (epochs + 1, train_delta / 60., train_speed, train_speed * (train_src_tokens + train_tgt_tokens) / train_sentences), f=sys.stderr)
-
       # This is probably sub-optimal, doing eval per-epoch
       eval_start = time.time()
-      bleu_score, (eval_speed, eval_latencies), eval_output_tokens = estimator.eval_fn(infer_hparams)
+      global_step, bleu_score, (sentences_sec, eval_latencies), eval_output_tokens = estimator.eval_fn(infer_hparams)
       eval_end = time.time()
       eval_delta = eval_end - eval_start
+      tokens_sec = sentences_sec * (eval_src_tokens + eval_output_tokens) / eval_sentences
       utils.print_out("eval time for epoch %d: %.2f mins (%.2f sent/sec, %.2f tokens/sec)" %
-                      (epochs + 1, eval_delta / 60., eval_speed, eval_speed * (eval_src_tokens + eval_output_tokens) / eval_sentences), f=sys.stderr)
+                      (epochs + 1, eval_delta / 60., sentences_sec, tokens_sec), f=sys.stderr)
       for lat in sorted(eval_latencies):
         utils.print_out("eval latency_%s for epoch %d: %.2f ms" % (lat, epochs + 1, eval_latencies[lat] * 1000))
+
+      wandb.log({"eval/sentences_per_second": sentences_sec,
+                 "eval/tokens_per_second": tokens_sec}, step=global_step, commit=False)
+      wandb.log({f"eval/latency_{k if k == 'avg' else k + '_percentile'}": eval_latencies[k] for k in eval_latencies},
+                step=global_step)
 
 
       if FLAGS.debug or (FLAGS.target_bleu is not None and bleu_score > FLAGS.target_bleu):
@@ -1083,4 +1097,10 @@ if __name__ == "__main__":
   nmt_parser = argparse.ArgumentParser()
   add_arguments(nmt_parser)
   FLAGS, unparsed = nmt_parser.parse_known_args()
+  hvd.init()
+  FLAGS.output_dir = FLAGS.output_dir + f"_rank_{hvd.rank()}_of_{hvd.size()}"
+  if hvd.rank() != 0:
+    os.environ['WANDB_MODE'] = 'dryrun'
+  wandb.init()
+  wandb.tensorboard.patch(save=False)
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)

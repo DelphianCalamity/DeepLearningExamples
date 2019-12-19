@@ -183,52 +183,52 @@ class BaseModel(object):
       # decay
       self.learning_rate = self._get_learning_rate_decay(hparams)
 
-    if (hparams.use_dist_strategy and
-        self.mode == tf.contrib.learn.ModeKeys.TRAIN):
-      # Gradients
-      params = tf.trainable_variables()
-      # Print trainable variables
-      utils.print_out("# Trainable variables")
-      utils.print_out(
-          "Format: <name>, <shape>, <dtype>, <(soft) device placement>")
-      for param in params:
-        utils.print_out(
-            "  %s, %s, %s, %s" % (param.name, str(param.get_shape()),
-                                  param.dtype.name, param.op.device))
-      utils.print_out("Total params size: %.2f GB" % (4. * np.sum([
-          p.get_shape().num_elements()
-          for p in params
-          if p.shape.is_fully_defined()
-      ]) / 2**30))
-
-      # Optimizer
-      if hparams.optimizer == "sgd":
-        opt = tf.train.GradientDescentOptimizer(self.learning_rate)
-      elif hparams.optimizer == "adam":
-        opt = tf.train.AdamOptimizer(self.learning_rate)
-      else:
-        raise ValueError("Unknown optimizer type %s" % hparams.optimizer)
-      assert opt is not None
-
-      grads_and_vars = opt.compute_gradients(
-          self.train_loss,
-          params,
-          colocate_gradients_with_ops=hparams.colocate_gradients_with_ops)
-      gradients = [x for (x, _) in grads_and_vars]
-
-      clipped_grads, grad_norm = model_helper.gradient_clip(
-          gradients, max_gradient_norm=hparams.max_gradient_norm)
-      self.grad_norm = grad_norm
-      self.params = params
-      self.grads = clipped_grads
-
-      self.update = opt.apply_gradients(
-          list(zip(clipped_grads, params)), global_step=self.global_step)
-    else:
-      self.grad_norm = None
-      self.update = None
-      self.params = None
-      self.grads = None
+    # if (hparams.use_dist_strategy and
+    #     self.mode == tf.contrib.learn.ModeKeys.TRAIN):
+    #   # Gradients
+    #   params = tf.trainable_variables()
+    #   # Print trainable variables
+    #   utils.print_out("# Trainable variables")
+    #   utils.print_out(
+    #       "Format: <name>, <shape>, <dtype>, <(soft) device placement>")
+    #   for param in params:
+    #     utils.print_out(
+    #         "  %s, %s, %s, %s" % (param.name, str(param.get_shape()),
+    #                               param.dtype.name, param.op.device))
+    #   utils.print_out("Total params size: %.2f GB" % (4. * np.sum([
+    #       p.get_shape().num_elements()
+    #       for p in params
+    #       if p.shape.is_fully_defined()
+    #   ]) / 2**30))
+    #
+    #   # Optimizer
+    #   if hparams.optimizer == "sgd":
+    #     opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+    #   elif hparams.optimizer == "adam":
+    #     opt = tf.train.AdamOptimizer(self.learning_rate)
+    #   else:
+    #     raise ValueError("Unknown optimizer type %s" % hparams.optimizer)
+    #   assert opt is not None
+    #
+    #   grads_and_vars = opt.compute_gradients(
+    #       self.train_loss,
+    #       params,
+    #       colocate_gradients_with_ops=hparams.colocate_gradients_with_ops)
+    #   gradients = [x for (x, _) in grads_and_vars]
+    #
+    #   clipped_grads, grad_norm = model_helper.gradient_clip(
+    #       gradients, max_gradient_norm=hparams.max_gradient_norm)
+    #   self.grad_norm = grad_norm
+    #   self.params = params
+    #   self.grads = clipped_grads
+    #
+    #   self.update = opt.apply_gradients(
+    #       list(zip(clipped_grads, params)), global_step=self.global_step)
+    # else:
+    self.grad_norm = None
+    self.update = None
+    self.params = None
+    self.grads = None
 
   def _get_learning_rate_warmup(self, hparams):
     """Get learning rate warmup."""
