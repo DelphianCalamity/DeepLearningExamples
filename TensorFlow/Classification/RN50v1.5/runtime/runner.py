@@ -281,7 +281,7 @@ class Runner(object):
         if mode == 'train':
             if hvd_utils.is_using_hvd():
                 config = config.replace(
-                    save_checkpoints_steps=1000 if hvd.rank() == 0 else None, keep_checkpoint_every_n_hours=3
+                    save_checkpoints_steps=1250 if hvd.rank() == 0 else None, keep_checkpoint_every_n_hours=1, keep_checkpoint_max=51
                 )
             else:
                 config = config.replace(save_checkpoints_steps=1000, keep_checkpoint_every_n_hours=3)
@@ -616,13 +616,16 @@ class Runner(object):
                 )
 
         try:
-            eval_results = image_classifier.evaluate(
-                input_fn=evaluation_data_fn,
-                steps=num_steps,
-                hooks=eval_hooks,
-            )
-            LOGGER.log('Top-1 Accuracy: %.3f' % float(eval_results['top1_accuracy'] * 100))
-            LOGGER.log('Top-5 Accuracy: %.3f' % float(eval_results['top5_accuracy'] * 100))
+            for i in list(range(0,31251,1250)):
+                ckpt = "/home/hoc0a/none_16node_resnet50_imagenet_32bit/model.ckpt-{}".format(i)
+                eval_results = image_classifier.evaluate(
+                    input_fn=evaluation_data_fn,
+                    steps=num_steps,
+                    hooks=eval_hooks,
+                    checkpoint_path=ckpt,
+                )
+                LOGGER.log('Top-1 Accuracy: %.3f' % float(eval_results['top1_accuracy'] * 100))
+                LOGGER.log('Top-5 Accuracy: %.3f' % float(eval_results['top5_accuracy'] * 100))
 
             #def get_serving_input_receiver_fn(batch_size, height, width, num_channels, data_format, dtype=tf.float32):   
             

@@ -308,17 +308,17 @@ class ResnetModel(object):
 
                     if hvd_utils.is_using_hvd():
                         hvd_params = {
-                            "compress_method": params.horovod_compress_method,
-                            "comm_method": params.horovod_comm_method,
-                            "use_memory": params.horovod_compress_memory,
-                            "gradient_clipping": params.horovod_gradient_clipping,
-                            "compress_ratio": params.horovod_compress_ratio,
-                            "threshold_val": params.horovod_threshold_val,
-                            "quantum_num": params.horovod_quantum_number,
-                            "momentum": params.momentum,
-                            "learning_rate": params.init_learning_rate,
+                            "compress_method": "natural",#params.horovod_compress_method,
+                            "comm_method": "allreduce",#params.horovod_comm_method,
+                            "use_memory": False,#params.horovod_compress_memory,
+                            #"gradient_clipping": params.horovod_gradient_clipping,
+                            #"compress_ratio": params.horovod_compress_ratio,
+                            #"threshold_val": params.horovod_threshold_val,
+                            #"quantum_num": params.horovod_quantum_number,
+                            #"momentum": params.momentum,
+                            #"learning_rate": params.init_learning_rate,
                         }
-                        optimizer = hvd.DistributedOptimizer(optimizer, device_dense=params.horovod_device,
+                        optimizer = hvd.DistributedOptimizer(optimizer, device_dense="gpu",#params.horovod_device,
                                                              params=hvd_params)
                         if hvd.rank() == 0:
                             LOGGER.log("hvd DistributedOptimizer params: ", params)
