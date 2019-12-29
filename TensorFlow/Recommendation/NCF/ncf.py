@@ -176,7 +176,12 @@ def main():
         log_args(args)
     else:
         os.environ['WANDB_MODE'] = 'dryrun'
-    wandb.init(config=args, sync_tensorboard=True)
+    wandb_id = os.environ.get('WANDB_ID', None)
+    if wandb_id is None:
+        wandb.init(config=args)
+    else:
+        wandb.init(config=args, id=f"{wandb_id}{hvd.rank()}")
+    wandb.tensorboard.patch(save=False)
 
     if args.seed is not None:
         tf.random.set_random_seed(args.seed)

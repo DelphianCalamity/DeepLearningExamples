@@ -122,7 +122,12 @@ class Runner(object):
 
             if hvd.rank()!=0:
                 os.environ['WANDB_MODE'] = 'dryrun'
-            wandb.init()
+            wandb_id = os.environ.get('WANDB_ID', None)
+            if wandb_id is None:
+                wandb.init()
+            else:
+                wandb.init(id=f"{wandb_id}{hvd.rank()}")
+                wandb.tensorboard.patch(save=False)
 
             if hvd.local_rank() == 0:
                 LOGGER.log("Horovod successfully initialized ...")

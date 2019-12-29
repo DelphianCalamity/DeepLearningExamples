@@ -163,7 +163,12 @@ class Runner(object):
 
         if hvd.rank() != 0:
             os.environ['WANDB_MODE'] = 'dryrun'
-        wandb.init(config=self.run_hparams.values(), sync_tensorboard=True)
+        wandb_id = os.environ.get('WANDB_ID', None)
+        if wandb_id is None:
+            wandb.init(config=self.run_hparams.values())
+        else:
+            wandb.init(config=self.run_hparams.values(), id=f"{wandb_id}{hvd.rank()}")
+        wandb.tensorboard.patch(save=False)
 
         self._model = resnet_v1_5.ResnetModel(
             model_name="resnet50_v1.5",

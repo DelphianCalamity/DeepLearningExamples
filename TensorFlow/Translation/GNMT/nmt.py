@@ -1101,6 +1101,10 @@ if __name__ == "__main__":
   FLAGS.output_dir = FLAGS.output_dir + f"_rank_{hvd.rank()}_of_{hvd.size()}"
   if hvd.rank() != 0:
     os.environ['WANDB_MODE'] = 'dryrun'
-  wandb.init()
+  wandb_id = os.environ.get('WANDB_ID', None)
+  if wandb_id is None:
+    wandb.init()
+  else:
+    wandb.init(id=f"{wandb_id}{hvd.rank()}")
   wandb.tensorboard.patch(save=False)
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
