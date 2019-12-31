@@ -482,8 +482,12 @@ def main():
                    "num_gpus": hvd.size(),
                    "train/total_throughput": np.mean(train_throughputs),
                    "eval/total_throughput": np.mean(eval_throughputs),
+                   "train/total_time": np.sum(train_times),
                    "train/time_to_target": time_to_train,
                    "train/time_to_best": time_to_best,
+                   "train/first_to_target": first_to_target,
+                   "train/best_hit_rate": best_hr,
+                   "train/best_epoch": best_epoch,
                    "epoch": args.epochs
                   })
 
