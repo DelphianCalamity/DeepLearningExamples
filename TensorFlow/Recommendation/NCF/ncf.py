@@ -181,6 +181,7 @@ def main():
         wandb.init(config=args)
     else:
         wandb.init(config=args, id=f"{wandb_id}{hvd.rank()}")
+    wandb.config.update({'SLURM_JOB_ID': os.environ.get('SLURM_JOB_ID', None)})
     wandb.tensorboard.patch(save=False)
 
     if args.seed is not None:

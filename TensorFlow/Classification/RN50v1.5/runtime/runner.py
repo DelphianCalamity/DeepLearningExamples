@@ -168,6 +168,7 @@ class Runner(object):
             wandb.init(config=self.run_hparams.values())
         else:
             wandb.init(config=self.run_hparams.values(), id=f"{wandb_id}{hvd.rank()}")
+        wandb.config.update({'SLURM_JOB_ID': os.environ.get('SLURM_JOB_ID', None)})
         wandb.tensorboard.patch(save=False)
 
         self._model = resnet_v1_5.ResnetModel(

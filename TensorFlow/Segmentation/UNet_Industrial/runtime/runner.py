@@ -124,9 +124,9 @@ class Runner(object):
                 os.environ['WANDB_MODE'] = 'dryrun'
             wandb_id = os.environ.get('WANDB_ID', None)
             if wandb_id is None:
-                wandb.init()
+                wandb.init(config={'SLURM_JOB_ID': os.environ.get('SLURM_JOB_ID', None)})
             else:
-                wandb.init(id=f"{wandb_id}{hvd.rank()}")
+                wandb.init(config={'SLURM_JOB_ID': os.environ.get('SLURM_JOB_ID', None)}, id=f"{wandb_id}{hvd.rank()}")
                 wandb.tensorboard.patch(save=False)
 
             if hvd.local_rank() == 0:
