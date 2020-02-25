@@ -48,6 +48,24 @@ def distributed_init(args):
             backend=args.distributed_backend, init_method=args.distributed_init_method)
         print("| distributed init done!", flush=True)
         args.distributed_world_size = int(os.environ['WORLD_SIZE'])
+    elif args.distributed_init_method.startswith('file://'):
+        import os
+        try:
+            rank = int(os.environ.get('OMPI_COMM_WORLD_RANK', args.distributed_rank))
+            world_size = int(os.environ.get('OMPI_COMM_WORLD_SIZE', args.distributed_world_size))
+        except TypeError:
+            raise RuntimeError("rank or world_size not provided")
+        shared_path = args.distributed_init_method.split("://")[1]
+        if not os.path.isdir(shared_path):
+            raise RuntimeError(f"{shared_path} not a valid (existing) directory")
+        shared_file = os.path.join(shared_path, "python_init_process_group")
+        if os.path.exists(shared_file):
+            import warnings
+            warnings.warn(f"{shared_file} exists, will remove and continue")
+            os.remove(shared_file)
+        torch.distributed.init_process_group(
+            backend=args.distributed_backend, init_method=args.distributed_init_method,
+            world_size=world_size, rank=rank)
     else:
         torch.distributed.init_process_group(
             backend=args.distributed_backend, init_method=args.distributed_init_method,
