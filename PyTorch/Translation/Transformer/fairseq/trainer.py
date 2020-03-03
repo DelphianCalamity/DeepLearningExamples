@@ -36,6 +36,8 @@ from fairseq import distributed_utils, optim, utils
 from fairseq.meters import AverageMeter, TimeMeter
 from fairseq.optim import lr_scheduler
 
+import compression
+from distutils.util import strtobool
 
 class Trainer(object):
     """Main class for data parallel training.
@@ -56,6 +58,74 @@ class Trainer(object):
         self.task = task
         self.model = model.cuda()
         self.criterion = criterion.cuda()
+        
+        # parse compression information
+        params = vars(args)
+#         params = {
+#             "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
+#             "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
+#             "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
+#             "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
+#             "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
+#             "gradient_clipping": strtobool(os.environ.get('HOROVOD_GRADIENT_CLIPPING', "False")),
+#             "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
+#             "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
+#             "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
+#             "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
+#             'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2)),
+#             'communication': os.environ.get('HOROVOD_COMM_METHOD', 'allreduce')
+#         }
+        
+        
+        if params['optimizer'] == 'sgd':
+            params['momentum'] = 0
+
+        if params["compress_method"] in ["none", "efsignsgd", "dgc", "powersgd"]:
+            pass
+        elif params["use_memory"]:
+            memory = compression.ResidualMemory(beta=params["beta"], gamma=params["gamma"])
+        else:
+            memory = compression.NoneMemory()
+
+        if params["compress_method"] == 'none':
+            compressor = compression.NoneCompressor()
+        elif params["compress_method"] == 'fp16':
+            compressor = compression.FP16Compressor(memory=memory)
+        elif params["compress_method"] == 'randomk':
+            compressor = compression.RandomKCompressor(compress_ratio=params['compress_ratio'],
+                                                            memory=memory)
+        elif params["compress_method"] == 'topk':
+            compressor = compression.TopKCompressor(compress_ratio=params['compress_ratio'],
+                                                         memory=memory)
+        elif params["compress_method"] == 'threshold':
+            compressor = compression.ThresholdCompressor(threshold_val=params['threshold_val'],
+                                                              memory=memory)
+        elif params["compress_method"] == 'signsgd':
+            compressor = compression.SignSGDCompressor(memory=memory)
+        elif params["compress_method"] == 'efsignsgd':
+            compressor = compression.EFSignSGDCompressor(lr=params['learning_rate'])
+        elif params["compress_method"] == 'signum':
+            compressor = compression.SignumCompressor(momentum=params['momentum'], memory=memory)
+        elif params["compress_method"] == 'qsgd':
+            compressor = compression.QSGDCompressor(quantum_num=params['quantum_num'], memory=memory)
+        elif params["compress_method"] == 'onebit':
+            compressor = compression.OneBitCompressor(memory=memory)
+        elif params["compress_method"] == 'natural':
+            compressor = compression.NaturalCompressor(memory=memory)
+        elif params["compress_method"] == 'terngrad':
+            compressor = compression.TernGradCompressor(memory=memory)
+        elif params["compress_method"] == 'dgc':
+            compressor = compression.DgcCompressor(compress_ratio=params['compress_ratio'],
+                                                        momentum=params['momentum'],
+                                                        gradient_clipping=params['gradient_clipping'])
+        elif params["compress_method"] == 'powersgd':
+            compressor = compression.PowerSGDCompressor(rank=params['compress_rank'],
+                                                                     use_memory=params['use_memory'])
+        return compressor
+
+
+
+
 
         # initialize meters
         self.meters = OrderedDict()
