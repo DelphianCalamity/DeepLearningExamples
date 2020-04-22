@@ -39,6 +39,7 @@ import numpy as np
 import cupy as cp
 import horovod.tensorflow as hvd
 import wandb
+import subprocess
 
 from mpi4py import MPI
 
@@ -176,6 +177,18 @@ def main():
         log_args(args)
     wandb_project = os.environ['wandb_project']
     wandb.init(project=wandb_project, sync_tensorboard=False)
+
+    wandb.config.comm_method = os.environ.get('HOROVOD_COMM_METHOD')
+    # wandb.config.bloom_on = self.params.horovod_bloom_on
+    wandb.config.compress_memory = os.environ.get('HOROVOD_COMPRESS_MEMORY')
+    wandb.config.horovod_compress_method = os.environ.get('HOROVOD_COMPRESS_METHOD')
+    wandb.config.horovod_compress_ratio = os.environ.get('HOROVOD_COMPRESS_RATIO')
+    wandb.config.fpr = os.environ.get('HOROVOD_BLOOM_FPR')
+    # wandb.config.code = self.params.code
+    # wandb.config.encoding = self.params.encoding
+    wandb.config.policy = os.environ.get('HOROVOD_BLOOM_POLICY')
+    wandb.config.false_positives_aware = os.environ.get('HOROVOD_BLOOM_FALSE_POSITIVES_AWARE')
+    # wandb.config.stacked = self.params.stacked
 
     if args.seed is not None:
         tf.random.set_random_seed(args.seed)
@@ -368,6 +381,46 @@ def main():
             )
         train_duration = time.time() - train_start
         wandb.log({"train/epoch_time": train_duration}, commit=False)
+
+        ############################# log some statistics #############################
+        horovod_compress_method = os.environ.get('HOROVOD_COMPRESS_METHOD', 'none')
+        horovod_bloom_verbosity = int(os.environ.get('HOROVOD_BLOOM_VERBOSITY_FREQUENCY', 0))
+        horovod_bitstream_encoding = os.environ.get('HOROVOD_BITSTREAM_ENCODING', 'none')
+        bloom_logs_path = os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs")
+        path = bloom_logs_path + "/" + str(hvd.rank())
+
+        if horovod_compress_method in {"bloom"} and horovod_bloom_verbosity != 0:
+            cmd1 = "cat " + path + "/*/*/fpr* | awk -F ' ' '{false_positives += $2} END {print false_positives}'"
+            cmd2 = "cat " + path + "/*/*/fpr* | awk -F ' ' '{total += $4} END {print total}'"
+            p = subprocess.Popen(cmd1, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+            false_positives = int(p)
+            p = subprocess.Popen(cmd2, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+            total = int(p)
+            wandb.log({"False_pos_accum": false_positives})
+            wandb.log({"FPR": false_positives / total})
+
+            cmd1 = "cat " + path + "/*/*/policy_errors* | awk -F ' ' '{policy_errors += $2} END {print policy_errors}'"
+            cmd2 = "cat " + path + "/*/*/policy_errors* | awk -F ' ' '{total += $4} END {print total}'"
+            p = subprocess.Popen(cmd1, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+            policy_errors = int(p)
+            p = subprocess.Popen(cmd2, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+            total = int(p)
+            wandb.log({"policy_errors": policy_errors})
+            wandb.log({"rate_policy_errors": policy_errors / total})
+
+        if horovod_bloom_verbosity != 0 and (horovod_compress_method in {"bloom"} \
+                                             or (horovod_compress_method == "topk" and horovod_bitstream_encoding != 'none')):
+            cmd1 = "cat " + path + "/*/*/stats* | awk -F ' ' '{initial_size += $2} END {print initial_size}'"
+            cmd2 = "cat " + path + "/*/*/stats* | awk -F ' ' '{final_size += $4} END {print final_size}'"
+            p = subprocess.Popen(cmd1, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+            initial_size = int(p)
+            p = subprocess.Popen(cmd2, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+            final_size = int(p)
+            wandb.log({"Init Bits": initial_size})
+            wandb.log({"Final Bits": final_size})
+            wandb.log({"ratio": (final_size / initial_size)})
+        ############################# /log some statistics #############################
+
         ## Only log "warm" epochs
         if epoch >= 1:
             train_times.append(train_duration)

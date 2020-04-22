@@ -30,6 +30,7 @@
 
 import tensorflow as tf
 import horovod.tensorflow as hvd
+import wandb
 
 def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
                                     initializer=None, regularizer=None,
@@ -233,7 +234,18 @@ def ncf_model_ops(users,
             optimizer = tf.contrib.mixed_precision.LossScaleOptimizer(optimizer, loss_scale_manager)
 
         # Horovod wrapper for distributed training
-        optimizer = hvd.DistributedOptimizer(optimizer)
+        params = {}
+        horovod_compress_method = os.environ.get('HOROVOD_COMPRESS_METHOD', 'none')
+        if horovod_compress_method in {"bloom"}:
+            params['bloom_config'] = wandb.Table(columns=["K", "Bloom Size", "#Hash Functions", "fpr"])
+            params['throughput_info'] = wandb.Table(columns=["Would-Send (Bits)", "Would-Send (Bytes)",
+                                                             "Will-Send (Bits)", "Will-Send (Bytes)",
+                                                             "Gain (Bits)", "Gain (Bytes)"])
+        optimizer = hvd.DistributedOptimizer(optimizer, params=params)
+
+        if horovod_compress_method in {"bloom"}:
+            wandb.log({"Throughput_Info": params['throughput_info']})
+            wandb.log({"Bloom_Config": params['bloom_config']})
 
         # Update ops
         global_step = tf.train.get_global_step()
